@@ -1,8 +1,11 @@
 # ☁️ Yandex Disk API Automation Tests
 
 **Проект:** Задание D3 - Автотесты REST
+
 **Автор:** Ильясова Аделя  
+
 **Стек:** Python 3.10, Pytest, Allure
+
 **Дата:** Май 2026
 
 ---
