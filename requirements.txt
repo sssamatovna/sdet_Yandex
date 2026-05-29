@@ -1,6 +1,9 @@
-allure-pytest==2.16.0
-black==26.5.1
-flake8==7.3.0
-isort==8.0.1
-pydantic-settings==2.14.1
-requests==2.34.2
+pytest
+requests
+pydantic
+pydantic-settings
+allure-pytest
+
+black
+flake8
+isort

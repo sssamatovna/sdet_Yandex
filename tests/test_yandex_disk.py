@@ -1,77 +1,139 @@
 import allure
-from config import settings
+import pytest
 from helpers.allure_helpers import attach_api_response, attach_validation_result
-
-# Импортируем схемы валидации, которые мы добавили в клиентский модуль
-from api.yandex_client import DiskResponseSchema, ErrorResponseSchema
+from api.yandex_client import FolderLinkSchema, ErrorResponseSchema
 
 
 @allure.epic("Yandex Disk API")
-@allure.feature("Получение информации о диске")
-@allure.story("Успешное получение данных")
-@allure.title("ТС-01 Авторизация с валидным токеном")
-@allure.description("Проверка получения данных авторизированного пользователя")
-@allure.severity(allure.severity_level.BLOCKER)
-@allure.tag("smoke", "auth", "positive")
-def test_tc1_auth_valid_token(yandex_client):
-    with allure.step("Отправить GET запрос по адресу v1/disk/"):
-        response = yandex_client.get_disk_info()
-        attach_api_response(response, expected_status=200)
+@allure.feature("Управление папками ресурса")
+class TestYandexDiskFolders:
 
-    with allure.step("Проверить статус-код ответа"):
-        assert (
-                response.status_code == 200
-        ), f"Ожидался 200, получен {response.status_code}"
+    @allure.story("Позитивные сценарии")
+    @allure.title("ТС-01 Создание новой папки")
+    @allure.severity(allure.severity_level.CRITICAL)
+    @allure.tag("smoke", "folder", "positive")
+    def test_tc1_create_folder(self, yandex_client, auto_cleanup_folder):
+        folder_name = auto_cleanup_folder
 
-    with allure.step("Валидировать структуру ответа через Pydantic"):
-        # Строгая проверка типов данных по требованию ментора
-        parsed_data = DiskResponseSchema(**response.json())
+        with allure.step(f"Отправить PUT запрос на создание папки '{folder_name}'"):
+            response = yandex_client.create_folder(path=folder_name)
+            attach_api_response(response, expected_status=201)
 
-    with allure.step("Проверить данные пользователя"):
-        attach_validation_result("Login", settings.yandex_login, parsed_data.user.login)
-        assert (
-                parsed_data.user.login == settings.yandex_login
-        ), f"Login ожидался '{settings.yandex_login}', получен '{parsed_data.user.login}'"
+        with allure.step("Проверить статус-код ответа"):
+            assert response.status_code == 201, f"Ожидался 201, получен {response.status_code}"
 
-        attach_validation_result(
-            "Display Name", settings.yandex_display_name, parsed_data.user.display_name
-        )
-        assert (
-                parsed_data.user.display_name == settings.yandex_display_name
-        ), f"Name ожидался '{settings.yandex_display_name}', получен '{parsed_data.user.display_name}'"
+        with allure.step("Валидировать структуру ответа через Pydantic"):
+            parsed_data = FolderLinkSchema(**response.json())
+            assert parsed_data.method == "GET", "Ожидался метод GET для созданного ресурса"
 
+    @allure.story("Позитивные сценарии")
+    @allure.title("ТС-02 Удаление папки (Перемещение в корзину)")
+    @allure.severity(allure.severity_level.CRITICAL)
+    @allure.tag("smoke", "folder", "positive")
+    def test_tc2_delete_folder(self, yandex_client, unique_folder_name):
+        folder_name = unique_folder_name
 
-@allure.epic("Yandex Disk API")
-@allure.feature("Получение информации о диске")
-@allure.story("Обработка ошибок доступа")
-@allure.title("ТС-02 Авторизация без токена")
-@allure.description(
-    "Проверка получения 401 ошибки при запросе без заголовка Authorization"
-)
-@allure.severity(allure.severity_level.CRITICAL)
-@allure.tag("security", "auth", "negative")
-# Используем чистую фикстуру unauthorized_client вместо создания объекта вручную
-def test_tc2_auth_missing_token(unauthorized_client):
-    with allure.step("Отправить GET запрос по адресу v1/disk/ без передачи токена"):
-        response = unauthorized_client.get_disk_info()
-        attach_api_response(response, expected_status=401)
+        with allure.step(f"Предусловие: Создать папку '{folder_name}'"):
+            yandex_client.create_folder(path=folder_name)
 
-    with allure.step("Проверить статус-код ответа"):
-        assert (
-                response.status_code == 401
-        ), f"Ожидался 401, получен {response.status_code}"
+        with allure.step(f"Отправить DELETE запрос для папки '{folder_name}'"):
+            response = yandex_client.delete_folder(path=folder_name)
+            attach_api_response(response, expected_status=204)
 
-    with allure.step("Валидировать структуру ошибки через Pydantic"):
-        # Проверяем, что API вернул ровно те поля, что описаны в схеме (error, description, message)
-        parsed_error = ErrorResponseSchema(**response.json())
+        with allure.step("Проверить статус-код ответа"):
+            assert response.status_code == 204, f"Ожидался 204, получен {response.status_code}"
 
-    with allure.step("Проверить структуру и тип ошибки"):
-        attach_validation_result("Error", "UnauthorizedError", parsed_error.error)
-        assert (
-                parsed_error.error == "UnauthorizedError"
-        ), f"Ожидался 'UnauthorizedError', получен '{parsed_error.error}' "
+    @allure.story("Позитивные сценарии")
+    @allure.title("ТС-03 Восстановление папки из корзины")
+    @allure.severity(allure.severity_level.CRITICAL)
+    @allure.tag("smoke", "folder", "positive")
+    def test_tc3_restore_folder(self, yandex_client, auto_cleanup_folder):
+        folder_name = auto_cleanup_folder
 
-        # Сами проверки "in result" больше не нужны, так как Pydantic
-        # уже гарантировал наличие этих полей при создании parsed_error.
-        assert parsed_error.description is not None, "Поле 'description' пустое"
-        assert parsed_error.message is not None, "Поле 'message' пустое"
+        with allure.step(f"Предусловие: Создать и удалить папку '{folder_name}'"):
+            yandex_client.create_folder(path=folder_name)
+            yandex_client.delete_folder(path=folder_name)
+
+        with allure.step("Динамически найти точный путь папки в корзине"):
+            trash_response = yandex_client.get_trash_contents()
+            assert trash_response.status_code == 200, "Не удалось получить содержимое корзины"
+
+            # Ищем наш объект среди удаленных элементов
+            items = trash_response.json().get("_embedded", {}).get("items", [])
+            exact_trash_path = None
+            for item in items:
+                if item.get("name") == folder_name:
+                    exact_trash_path = item.get("path")
+                    break
+
+            # Если вдруг в корзине не нашли (капризы кэша API), используем fallback-вариант
+            if not exact_trash_path:
+                exact_trash_path = f"trash:/{folder_name}"
+
+        with allure.step(f"Отправить PUT запрос на восстановление из '{exact_trash_path}'"):
+            response = yandex_client.restore_folder(path=exact_trash_path)
+            attach_api_response(response, expected_status=201)
+
+        with allure.step("Проверить статус-код ответа"):
+            assert response.status_code == 201, f"Ожидался 201, получен {response.status_code}"
+
+        with allure.step("Валидировать структуру ответа восстановления"):
+            parsed_data = FolderLinkSchema(**response.json())
+            assert parsed_data.href is not None
+
+    @allure.story("Негативные сценарии")
+    @allure.title("ТС-04 Создание папки с уже существующим именем")
+    @allure.severity(allure.severity_level.NORMAL)
+    @allure.tag("regression", "folder", "negative")
+    def test_tc4_create_existing_folder(self, yandex_client, auto_cleanup_folder):
+        folder_name = auto_cleanup_folder
+
+        with allure.step(f"Предусловие: Инициализировать папку '{folder_name}'"):
+            yandex_client.create_folder(path=folder_name)
+
+        with allure.step(f"Повторно отправить PUT запрос для папки '{folder_name}'"):
+            response = yandex_client.create_folder(path=folder_name)
+            attach_api_response(response, expected_status=409)
+
+        with allure.step("Проверить статус-код ответа и Pydantic-структуру ошибки"):
+            assert response.status_code == 409, f"Ожидался 409, получен {response.status_code}"
+            parsed_error = ErrorResponseSchema(**response.json())
+
+            # ТЗ-Исправление: Яндекс возвращает именно 'DiskPathPointsToExistentDirectoryError'
+            attach_validation_result("Error Type", "DiskPathPointsToExistentDirectoryError", parsed_error.error)
+            assert parsed_error.error == "DiskPathPointsToExistentDirectoryError"
+
+    @allure.story("Негативные сценарии")
+    @allure.title("ТС-05 Удаление несуществующей папки")
+    @allure.severity(allure.severity_level.NORMAL)
+    @allure.tag("regression", "folder", "negative")
+    def test_tc5_delete_non_existent_folder(self, yandex_client, unique_folder_name):
+        invalid_folder = f"{unique_folder_name}_not_exist"
+
+        with allure.step(f"Отправить DELETE запрос для несуществующей папки '{invalid_folder}'"):
+            response = yandex_client.delete_folder(path=invalid_folder)
+            attach_api_response(response, expected_status=404)
+
+        with allure.step("Проверить статус-код ответа и текст ошибки"):
+            assert response.status_code == 404, f"Ожидался 404, получен {response.status_code}"
+            parsed_error = ErrorResponseSchema(**response.json())
+            assert parsed_error.error in ["DiskNotFoundError", "NotFoundError"]
+
+    @allure.story("Негативные сценарии")
+    @allure.title("ТС-06 Восстановление несуществующего ресурса из корзины")
+    @allure.severity(allure.severity_level.NORMAL)
+    @allure.tag("regression", "folder", "negative")
+    def test_tc6_restore_non_existent_folder(self, yandex_client, unique_folder_name):
+        # Передаем фейковый путь в корзине
+        invalid_folder = f"trash:/{unique_folder_name}_trash_fake"
+
+        with allure.step(f"Отправить PUT запрос на восстановление отсутствующей папки '{invalid_folder}'"):
+            response = yandex_client.restore_folder(path=invalid_folder)
+            attach_api_response(response, expected_status=404)
+
+        with allure.step("Проверить статус-код ответа и тип ошибки Pydantic"):
+            assert response.status_code == 404, f"Ожидался 404, получен {response.status_code}"
+            parsed_error = ErrorResponseSchema(**response.json())
+
+            # ТЗ-Исправление: Расширили список валидных ошибок под 'DiskNotFoundError'
+            assert parsed_error.error in ["TrashNotFoundError", "NotFoundError", "DiskNotFoundError"]
